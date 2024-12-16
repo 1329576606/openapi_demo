@@ -1,0 +1,23 @@
+{
+  "name": "openai_demo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts"
+  },
+  "type": "commonjs",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "openai": "^4.76.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "node": "^23.4.0",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.2"
+  }
+}

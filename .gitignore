@@ -1,0 +1,7 @@
+.idea/*
+node_modules
+test
+coverage
+*.log
+pnpm-lock.yaml
+.env
