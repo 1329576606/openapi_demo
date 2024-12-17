@@ -1,6 +1,7 @@
 import { log } from 'console';
 import { config } from 'dotenv';
 import OpenAI from 'openai';
+import { ChatCompletionMessageParam } from 'openai/resources';
 config();
 
 const client = new OpenAI({
@@ -9,9 +10,19 @@ const client = new OpenAI({
 });
 
 async function main() {
+    const prompt = "write a quick sort algorithm.";
+    const messages:Array<ChatCompletionMessageParam> = [
+        {role: "system", content: "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+        {role: "user", content: prompt}
+    ]
     const chatCompletion = await client.chat.completions.create({
-        messages: [{ role: 'user', content: 'Say this is a test' }],
+        messages:messages,
         model: process.env["MODULE"],
+        temperature:1,
+        top_p:1,
+        max_completion_tokens:256,
+        frequency_penalty:0,
+        presence_penalty:0
     });
     log(chatCompletion.choices[0].message)
 }
