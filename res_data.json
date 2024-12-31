@@ -1,66 +1,64 @@
-```json
 {
     "output_list": [
         {
-            "function_name": "_update",
-            "code": "function _update(address from, address to, uint256[] memory ids, uint256[] memory values) internal virtual override {\n    if (from != address(0)) revert SeasonPassTransferNotAllowed();\n    super._update(from, to, ids, values);\n}",
-            "vulnerability": "无法转让代币",
-            "reason": "函数中包含了 `if (from != address(0)) revert SeasonPassTransferNotAllowed();`，这将阻止任何代币转移操作，导致代币无法流通。这在大多数情况下是不合理的，因为通常用户需要能够自由地转移动态代币。"
-        },
-        {
             "function_name": "purchase",
-            "code": "function purchase(PurchaseParams calldata params) public payable {\n    bytes32 hash = keccak256(\n        abi.encode(\n            params.seasonId,\n            params.count,\n            params.currency,\n            params.amount,\n            params.to,\n            params.inviter,\n            params.maxSeasonPassCount,\n            params.deadline,\n            address(this),\n            block.chainid\n        )\n    );\n    address signer = hash.toEthSignedMessageHash().recover(params.signature);\n    _checkRole(Constants.SERVER_SIGNER_ROLE, signer);\n    if (block.timestamp > params.deadline) {\n        revert SignatureExpired();\n    }\n    address currency = params.currency;\n    uint256 amount = params.amount;\n    uint256 ospRevenueSplit = Constants.OSP_REVENUE_SPLIT;\n    if (params.inviter != address(0)) {\n        uint256 reward = (amount * Constants.INVITER_REVENUE_SPLIT) / 100;\n        _rewards[params.inviter][currency].reward += reward;\n        totalRewards[currency] += reward;\n        emit RewardAdded(params.inviter, currency, reward, block.timestamp);\n    } else {\n        ospRevenueSplit += Constants.INVITER_REVENUE_SPLIT;\n    }\n    if (currency == address(0)) {\n        if (msg.value != amount) revert InvalidAmount();\n        Payment.payNative(ospTreasuryAddress, (amount * ospRevenueSplit) / 100);\n    } else {\n        Payment.payERC20(currency, msg.sender, address(this), amount);\n        Payment.payERC20(currency, ospTreasuryAddress, (amount * ospRevenueSplit) / 100);\n    }\n    _mint(params.to, params.seasonId, params.count, new bytes(0));\n    uint256 count = balanceOf(params.to, params.seasonId);\n    if (count > params.maxSeasonPassCount) {\n        revert MaxSeasonPassCountExceeded();\n    }\n    emit SeasonPassPurchased(\n        params.seasonId,\n        params.to,\n        count,\n        currency,\n        amount,\n        block.timestamp\n    );\n}",
-            "vulnerability": "重放攻击",
-            "reason": "签名验证没有与特定交易唯一标识符（如nonce）结合，攻击者可以重复使用有效的签名进行多次购买。这可能导致资金的不当转移和资源的浪费。"
+            "code": "function purchase(PurchaseParams calldata params) public payable { bytes32 hash = keccak256( abi.encode( params.seasonId, params.count, params.currency, params.amount, params.to, params.inviter, params.maxSeasonPassCount, params.deadline, address(this), block.chainid ) ); address signer = hash.toEthSignedMessageHash().recover(params.signature); _checkRole(Constants.SERVER_SIGNER_ROLE, signer); if (block.timestamp > params.deadline) { revert SignatureExpired(); } address currency = params.currency; uint256 amount = params.amount; uint256 ospRevenueSplit = Constants.OSP_REVENUE_SPLIT; if (params.inviter != address(0)) { uint256 reward = (amount * Constants.INVITER_REVENUE_SPLIT) / 100; _rewards[params.inviter][currency].reward += reward; totalRewards[currency] += reward; emit RewardAdded(params.inviter, currency, reward, block.timestamp); } else { ospRevenueSplit += Constants.INVITER_REVENUE_SPLIT; } if (currency == address(0)) { if (msg.value != amount) revert InvalidAmount(); Payment.payNative(ospTreasuryAddress, (amount * ospRevenueSplit) / 100); } else { Payment.payERC20(currency, msg.sender, address(this), amount); Payment.payERC20(currency, ospTreasuryAddress, (amount * ospRevenueSplit) / 100); } _mint(params.to, params.seasonId, params.count, new bytes(0)); uint256 count = balanceOf(params.to, params.seasonId); if (count > params.maxSeasonPassCount) { revert MaxSeasonPassCountExceeded(); } emit SeasonPassPurchased( params.seasonId, params.to, count, currency, amount, block.timestamp ); }",
+            "vulnerability": "签名重放攻击",
+            "reason": "在`purchase`函数中，虽然使用了签名来验证交易的合法性，但没有对签名进行唯一性检查。攻击者可以重复使用同一个签名进行多次交易，导致系统被滥用。"
         },
         {
             "function_name": "withdraw",
-            "code": "function withdraw(address currency, address to) public onlyRole(Constants.CASHIER_ROLE) {\n    uint256 value = (\n        address(0) == currency ? address(this).balance : IERC20(currency).balanceOf(address(this))\n    ) - totalRewards[currency];\n    if (value == 0) revert InvalidAmount();\n    currency == address(0) ? Payment.payNative(to, value) : Payment.payERC20(currency, to, value);\n}",
-            "vulnerability": "未计算已发放的奖励",
-            "reason": "函数中从合约余额中减去 totalRewards 后，可能会导致已发放给用户的奖励再次被提取，进而引发资金损失。"
+            "code": "function withdraw(address currency, address to) public onlyRole(Constants.CASHIER_ROLE) { uint256 value = ( address(0) == currency ? address(this).balance : IERC20(currency).balanceOf(address(this)) ) - totalRewards[currency]; if (value == 0) revert InvalidAmount(); currency == address(0) ? Payment.payNative(to, value) : Payment.payERC20(currency, to, value); }",
+            "vulnerability": "权限控制不足",
+            "reason": "`withdraw`函数仅检查了调用者是否具有`CASHIER_ROLE`角色，但没有对`to`地址进行任何验证。攻击者可以通过设置`to`地址为恶意地址，将资金转移到不受控制的账户中。"
         },
         {
             "function_name": "clamReward",
-            "code": "function clamReward(address currency, address to) public {\n    uint256 reward = _rewards[msg.sender][currency].reward;\n    _rewards[msg.sender][currency].reward = 0;\n    uint256 receivedReward = _rewards[msg.sender][currency].receivedReward + reward;\n    _rewards[msg.sender][currency].receivedReward = receivedReward;\n    totalRewards[currency] -= reward;\n    if (reward == 0) revert InvalidAmount();\n    if (currency == address(0)) {\n        Payment.payNative(to, reward);\n    } else {\n        Payment.payERC20(currency, to, reward);\n    }\n    emit ClaimReward(msg.sender, currency, to, reward, receivedReward, block.timestamp);\n}",
-            "vulnerability": "双重支付",
-            "reason": "如果在某个时刻调用了 withdraw 函数后，合约未正确维护其内部状态，可能会存在用户再次领取自己已领取的奖励的情况，造成双重支付。"
+            "code": "function clamReward(address currency, address to) public { uint256 reward = _rewards[msg.sender][currency].reward; _rewards[msg.sender][currency].reward = 0; uint256 receivedReward = _rewards[msg.sender][currency].receivedReward + reward; _rewards[msg.sender][currency].receivedReward = receivedReward; totalRewards[currency] -= reward; if (reward == 0) revert InvalidAmount(); if (currency == address(0)) { Payment.payNative(to, reward); } else { Payment.payERC20(currency, to, reward); } emit ClaimReward(msg.sender, currency, to, reward, receivedReward, block.timestamp); }",
+            "vulnerability": "奖励提取漏洞",
+            "reason": "`clamReward`函数允许用户提取奖励，但没有对`to`地址进行任何验证。攻击者可以通过设置`to`地址为恶意地址，将奖励转移到不受控制的账户中。"
+        },
+        {
+            "function_name": "_update",
+            "code": "function _update( address from, address to, uint256[] memory ids, uint256[] memory values ) internal virtual override { if (from != address(0)) revert SeasonPassTransferNotAllowed(); super._update(from, to, ids, values); }",
+            "vulnerability": "代币转移限制",
+            "reason": "`_update`函数禁止了所有非零地址的代币转移，这意味着用户无法将代币转移给其他用户。这种设计可能导致用户体验不佳，并且限制了代币的流动性。"
+        },
+        {
+            "function_name": "setBaseURI",
+            "code": "function setBaseURI(string calldata baseURI) public onlyRole(Constants.ADMIN_ROLE) { _setBaseURI(baseURI); }",
+            "vulnerability": "权限控制不足",
+            "reason": "`setBaseURI`函数仅检查了调用者是否具有`ADMIN_ROLE`角色，但没有对`baseURI`进行任何验证。攻击者可以通过设置恶意的`baseURI`，导致用户访问到不正确的资源。"
+        },
+        {
+            "function_name": "setURI",
+            "code": "function setURI( uint256 seasonId, string calldata baseURI ) public onlyRole(Constants.ADMIN_ROLE) { _setURI(seasonId, baseURI); }",
+            "vulnerability": "权限控制不足",
+            "reason": "`setURI`函数仅检查了调用者是否具有`ADMIN_ROLE`角色，但没有对`baseURI`进行任何验证。攻击者可以通过设置恶意的`baseURI`，导致用户访问到不正确的资源。"
         },
         {
             "function_name": "initialize",
-            "code": "function initialize() public initializer {\n    _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());\n}",
-            "vulnerability": "权限集中化",
-            "reason": "初始化函数中直接将默认管理员角色赋予初始化调用者，这可能引起权限过度集中的问题，若此账户被黑客控制，则可能导致整个合约的安全性出现问题。"
+            "code": "function initialize() public initializer { _grantRole(DEFAULT_ADMIN_ROLE, _msgSender()); }",
+            "vulnerability": "初始化漏洞",
+            "reason": "`initialize`函数没有对调用者进行任何限制，任何人都可以调用该函数并获取`DEFAULT_ADMIN_ROLE`角色。这可能导致系统被恶意用户控制。"
         },
         {
-            "function_name": "purchase",
-            "code": "function purchase(PurchaseParams calldata params) public payable {\n    bytes32 hash = keccak256(\n        abi.encode(\n            params.seasonId,\n            params.count,\n            params.currency,\n            params.amount,\n            params.to,\n            params.inviter,\n            params.maxSeasonPassCount,\n            params.deadline,\n            address(this),\n            block.chainid\n        )\n    );\n    address signer = hash.toEthSignedMessageHash().recover(params.signature);\n    _checkRole(Constants.SERVER_SIGNER_ROLE, signer);\n    if (block.timestamp > params.deadline) {\n        revert SignatureExpired();\n    }\n    address currency = params.currency;\n    uint256 amount = params.amount;\n    uint256 ospRevenueSplit = Constants.OSP_REVENUE_SPLIT;\n    if (params.inviter != address(0)) {\n        uint256 reward = (amount * Constants.INVITER_REVENUE_SPLIT) / 100;\n        _rewards[params.inviter][currency].reward += reward;\n        totalRewards[currency] += reward;\n        emit RewardAdded(params.inviter, currency, reward, block.timestamp);\n    } else {\n        ospRevenueSplit += Constants.INVITER_REVENUE_SPLIT;\n    }\n    if (currency == address(0)) {\n        if (msg.value != amount) revert InvalidAmount();\n        Payment.payNative(ospTreasuryAddress, (amount * ospRevenueSplit) / 100);\n    } else {\n        Payment.payERC20(currency, msg.sender, address(this), amount);\n        Payment.payERC20(currency, ospTreasuryAddress, (amount * ospRevenueSplit) / 100);\n    }\n    _mint(params.to, params.seasonId, params.count, new bytes(0));\n    uint256 count = balanceOf(params.to, params.seasonId);\n    if (count > params.maxSeasonPassCount) {\n        revert MaxSeasonPassCountExceeded();\n    }\n    emit SeasonPassPurchased(\n        params.seasonId,\n        params.to,\n        count,\n        currency,\n        amount,\n        block.timestamp\n    );\n}",
-            "vulnerability": "拒绝服务（DoS）",
-            "reason": "如果 `Payment.payERC20` 调用失败，由于在 `Payment.payERC20` 内部会尝试增加允许数量并重试，但若该重试仍然失败，攻击者可以构造恶意输入使这些操作持续消耗大量Gas，导致其他用户的交易被拒绝服务。"
+            "function_name": "supportsInterface",
+            "code": "function supportsInterface( bytes4 interfaceId ) public view virtual override(AccessControlUpgradeable, ERC1155Upgradeable, IERC165) returns (bool) { return AccessControlUpgradeable.supportsInterface(interfaceId) || ERC1155Upgradeable.supportsInterface(interfaceId); }",
+            "vulnerability": "接口支持漏洞",
+            "reason": "`supportsInterface`函数没有正确处理多个父合约的接口支持情况，可能导致某些接口无法被正确识别，影响合约的兼容性。"
         },
         {
-            "function_name": "purchase",
-            "code": "function purchase(PurchaseParams calldata params) public payable {\n    bytes32 hash = keccak256(\n        abi.encode(\n            params.seasonId,\n            params.count,\n            params.currency,\n            params.amount,\n            params.to,\n            params.inviter,\n            params.maxSeasonPassCount,\n            params.deadline,\n            address(this),\n            block.chainid\n        )\n    );\n    address signer = hash.toEthSignedMessageHash().recover(params.signature);\n    _checkRole(Constants.SERVER_SIGNER_ROLE, signer);\n    if (block.timestamp > params.deadline) {\n        revert SignatureExpired();\n    }\n    address currency = params.currency;\n    uint256 amount = params.amount;\n    uint256 ospRevenueSplit = Constants.OSP_REVENUE_SPLIT;\n    if (params.inviter != address(0)) {\n        uint256 reward = (amount * Constants.INVITER_REVENUE_SPLIT) / 100;\n        _rewards[params.inviter][currency].reward += reward;\n        totalRewards[currency] += reward;\n        emit RewardAdded(params.inviter, currency, reward, block.timestamp);\n    } else {\n        ospRevenueSplit += Constants.INVITER_REVENUE_SPLIT;\n    }\n    if (currency == address(0)) {\n        if (msg.value != amount) revert InvalidAmount();\n        Payment.payNative(ospTreasuryAddress, (amount * ospRevenueSplit) / 100);\n    } else {\n        Payment.payERC20(currency, msg.sender, address(this), amount);\n        Payment.payERC20(currency, ospTreasuryAddress, (amount * ospRevenueSplit) / 100);\n    }\n    _mint(params.to, params.seasonId, params.count, new bytes(0));\n    uint256 count = balanceOf(params.to, params.seasonId);\n    if (count > params.maxSeasonPassCount) {\n        revert MaxSeasonPassCountExceeded();\n    }\n    emit SeasonPassPurchased(\n        params.seasonId,\n        params.to,\n        count,\n        currency,\n        amount,\n        block.timestamp\n    );\n}",
-            "vulnerability": "整数溢出/下溢",
-            "reason": "代码中使用了乘法和除法来处理金额分配（如：`(amount * Constants.INVITER_REVENUE_SPLIT) / 100`），在处理大数值时可能发生溢出或下溢，从而造成资金的不当分配。尽管本例中可能性不大，但在某些特殊场景下仍需注意。"
+            "function_name": "reward",
+            "code": "function reward(address user, address currency) public view returns (RewardStruct memory) { return _rewards[user][currency]; }",
+            "vulnerability": "信息泄露",
+            "reason": "`reward`函数允许任何人查询任意用户的奖励信息，这可能导致用户隐私泄露。"
         },
         {
-            "function_name": "purchase",
-            "code": "function purchase(PurchaseParams calldata params) public payable {\n    bytes32 hash = keccak256(\n        abi.encode(\n            params.seasonId,\n            params.count,\n            params.currency,\n            params.amount,\n            params.to,\n            params.inviter,\n            params.maxSeasonPassCount,\n            params.deadline,\n            address(this),\n            block.chainid\n        )\n    );\n    address signer = hash.toEthSignedMessageHash().recover(params.signature);\n    _checkRole(Constants.SERVER_SIGNER_ROLE, signer);\n    if (block.timestamp > params.deadline) {\n        revert SignatureExpired();\n    }\n    address currency = params.currency;\n    uint256 amount = params.amount;\n    uint256 ospRevenueSplit = Constants.OSP_REVENUE_SPLIT;\n    if (params.inviter != address(0)) {\n        uint256 reward = (amount * Constants.INVITER_REVENUE_SPLIT) / 100;\n        _rewards[params.inviter][currency].reward += reward;\n        totalRewards[currency] += reward;\n        emit RewardAdded(params.inviter, currency, reward, block.timestamp);\n    } else {\n        ospRevenueSplit += Constants.INVITER_REVENUE_SPLIT;\n    }\n    if (currency == address(0)) {\n        if (msg.value != amount) revert InvalidAmount();\n        Payment.payNative(ospTreasuryAddress, (amount * ospRevenueSplit) / 100);\n    } else {\n        Payment.payERC20(currency, msg.sender, address(this), amount);\n        Payment.payERC20(currency, ospTreasuryAddress, (amount * ospRevenueSplit) / 100);\n    }\n    _mint(params.to, params.seasonId, params.count, new bytes(0));\n    uint256 count = balanceOf(params.to, params.seasonId);\n    if (count > params.maxSeasonPassCount) {\n        revert MaxSeasonPassCountExceeded();\n    }\n    emit SeasonPassPurchased(\n        params.seasonId,\n        params.to,\n        count,\n        currency,\n        amount,\n        block.timestamp\n    );\n}",
-            "vulnerability": "未正确验证代币转账",
-            "reason": "在 `Payment.payERC20` 中调用了 `safeTransferFrom`，但如果代币合约实现了错误的返回值，则有可能无法正确判断转账是否成功。这种情况下，代币可能会被错误地标记为已转移到合约中，从而可能导致后续错误的操作。"
-        },
-        {
-            "function_name": "withdraw",
-            "code": "function withdraw(address currency, address to) public onlyRole(Constants.CASHIER_ROLE) {\n    uint256 value = (\n        address(0) == currency ? address(this).balance : IERC20(currency).balanceOf(address(this))\n    ) - totalRewards[currency];\n    if (value == 0) revert InvalidAmount();\n    currency == address(0) ? Payment.payNative(to, value) : Payment.payERC20(currency, to, value);\n}",
-            "vulnerability": "竞态条件",
-            "reason": "在计算 `value` 和实际转账之间的时间窗口内，可能有其他交易修改了合约余额或 `totalRewards`，导致提取的价值不准确，引发资金安全问题。"
-        },
-        {
-            "function_name": "clamReward",
-            "code": "function clamReward(address currency, address to) public {\n    uint256 reward = _rewards[msg.sender][currency].reward;\n    _rewards[msg.sender][currency].reward = 0;\n    uint256 receivedReward = _rewards[msg.sender][currency].receivedReward + reward;\n    _rewards[msg.sender][currency].receivedReward = receivedReward;\n    totalRewards[currency] -= reward;\n    if (reward == 0) revert InvalidAmount();\n    if (currency == address(0)) {\n        Payment.payNative(to, reward);\n    } else {\n        Payment.payERC20(currency, to, reward);\n    }\n    emit ClaimReward(msg.sender, currency, to, reward, receivedReward, block.timestamp);\n}",
-            "vulnerability": "竞态条件",
-            "reason": "在计算 `reward` 和将其设置为0之间存在时间窗口，可能会有其他交易修改 `_rewards[msg.sender][currency].reward` 的值，导致用户可以多次领取相同奖励。这种竞态条件可以被恶意利用来获取额外奖励。"
+            "function_name": "payERC20",
+            "code": "function payERC20(address token, address from, address to, uint256 amount) internal { IERC20 payToken = IERC20(token); payToken.safeTransferFrom(from, to, amount); }",
+            "vulnerability": "ERC20 转账漏洞",
+            "reason": "`payERC20`函数没有对`from`地址的授权进行检查，可能导致未经授权的转账操作。攻击者可以利用此漏洞转移其他用户的资金。"
         }
     ]
 }
-```
